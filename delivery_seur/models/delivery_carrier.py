@@ -148,18 +148,19 @@ class DeliveryCarrier(models.Model):
                 method, title, etree.tostring(data['envelope'])))
 
         def create_rewrite_plugin(data):
-            key = [k for k, v in data.items() if isinstance(v, dict)]
+            key = [k for k, v in data.items() if isinstance(v, list)]
             if not key:
-                return RewritePlugin('//no-dict', '')
+                return 0 # Devolver Error
             key = key[0]
-            if 'total_bultos' not in data[key]:
-                return RewritePlugin('//missing-key', '')
             xml_root = etree.Element('root')
             xml_exp = etree.SubElement(xml_root, 'exp')
-            for _index in range(int(data[key].get('total_bultos') or 1)):
+            for pkg in data[key]:
+                if 'total_bultos' not in pkg:
+                    return RewritePlugin('//missing-key', '')
                 package = etree.SubElement(xml_exp, 'bulto')
-                for k, v in data[key].items():
+                for k, v in pkg.items():
                     etree.SubElement(package, k).text = str(v or '')
+            xml = etree.tostring(xml_root, encoding='ascii', method='xml', xml_declaration=True)
             xml = etree.tostring(xml_root, encoding='utf8', method='xml')
             data[key] = '-RewritePlugin-'
             return RewritePlugin('//*[text()="-RewritePlugin-"]', xml)
@@ -202,7 +203,10 @@ class DeliveryCarrier(models.Model):
         company = picking.company_id
         phone = (partner.phone and partner.phone.replace(' ', '') or '')
         mobile = (partner.mobile and partner.mobile.replace(' ', '') or '')
-        return {
+        package_info_list = []
+        packages = self.env[<PACKAGE_MODEL>].search([('sale_order_id', '=', picking.order_id.id)])
+        for pkg in packages:
+            package_info_list.append({
             'ci': self.seur_integration_code,
             'nif': self.seur_vat,
             'ccc': self.seur_accounting_code,
@@ -211,12 +215,10 @@ class DeliveryCarrier(models.Model):
             'cod_centro': '',
             'total_bultos': picking.number_of_packages or 1,
             'total_kilos': picking.shipping_weight or 1,
-            # According API documentation, it's the total weight, not the
-            # package one
-            'pesoBulto': picking.shipping_weight or 1,
+            'pesoBulto': pkg.weight or 1,
             'observaciones': picking.note,
             'referencia_expedicion': picking.name,
-            'ref_bulto': '',
+            'ref_bulto': pkg.name or '',
             'clavePortes': 'F',
             'clavePod': '',
             'claveReembolso': 'F',
@@ -253,7 +255,9 @@ class DeliveryCarrier(models.Model):
             'tipoVia_remitente': '',
             'eci': 'N',
             'et': 'N',
-        }
+        })
+
+        return package_info_list
 
     def seur_create_shipping(self, picking):
         self.ensure_one()
